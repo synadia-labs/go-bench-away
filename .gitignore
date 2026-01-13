@@ -29,3 +29,6 @@ report.html
 task.md
 implementation_plan.md
 walkthrough.md
+
+# GitHub App credentials
+gha-creds-*.json
