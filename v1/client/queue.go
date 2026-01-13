@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/mprimi/go-bench-away/v1/core"
 
@@ -59,33 +60,102 @@ func (c *Client) CancelJob(jobId string) error {
 	return nil
 }
 
-func (c *Client) LoadRecentJobs(limit int) ([]*core.JobRecord, error) {
+func (c *Client) LoadRecentJobs(limit, offset int) ([]*core.JobRecord, error) {
+	return c.LoadJobs(limit, offset, false)
+}
+
+func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error) {
 	jobs := []*core.JobRecord{}
 
-	lastSubmitMsg, err := c.js.GetLastMsg(c.options.jobsQueueStreamName, c.options.jobsSubmitSubject)
+	// Get stream info to know bounds
+	sInfo, err := c.js.StreamInfo(c.options.jobsQueueStreamName)
 	if err == nats.ErrMsgNotFound {
 		return []*core.JobRecord{}, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	startSeq := lastSubmitMsg.Sequence
+	if sInfo.State.Msgs == 0 {
+		return []*core.JobRecord{}, nil
+	}
 
-	// List job requests from newest to oldest
-	for i := startSeq; i > 0; i-- {
-		// Stop early if a limit is set
-		if limit > 0 && startSeq-i > uint64(limit-1) {
+	var startSeq uint64
+	var endSeq uint64
+	var step int
+
+	if asc {
+		// Ascending (FIFO): Start from FirstSeq + offset
+		startSeq = sInfo.State.FirstSeq + uint64(offset)
+		endSeq = sInfo.State.LastSeq
+		step = 1
+		if startSeq > endSeq {
+			return []*core.JobRecord{}, nil
+		}
+	} else {
+		// Descending (LIFO/Recent): Start from LastSeq - offset
+		startSeq = sInfo.State.LastSeq
+		if uint64(offset) < sInfo.State.Msgs {
+			// Careful with gap logic.
+			// If we assume no gaps, Seq count = Msgs count.
+			// But if gaps, LastSeq - FirstSeq + 1 != Msgs.
+			// The original code used Sequence subtraction:
+			// startSeq = lastSubmitMsg.Sequence - offset.
+			// This works if gaps are ignored or fatal.
+			if uint64(offset) > startSeq {
+				return []*core.JobRecord{}, nil
+			}
+			startSeq = startSeq - uint64(offset)
+		} else {
+			// Offset >= Total Msgs (approx).
+			// Let's rely on simple sequence math as before.
+			if uint64(offset) > startSeq {
+				return []*core.JobRecord{}, nil
+			}
+			startSeq = startSeq - uint64(offset)
+		}
+		endSeq = sInfo.State.FirstSeq
+		if endSeq == 0 {
+			endSeq = 1
+		} // Sequences start at 1 usually
+		step = -1
+	}
+
+	for i := startSeq; ; i += uint64(step) {
+		// Boundary checks
+		if asc {
+			if i > endSeq {
+				break
+			}
+		} else {
+			if i < endSeq || i == 0 {
+				break
+			} // i starts high, goes down. Stop if < FirstSeq.
+		}
+
+		// Limit check
+		// Count how many we've processed?
+		// Actually limit applies to *results found*.
+		if limit > 0 && len(jobs) >= limit {
 			break
 		}
 
 		rawMsg, err := c.js.GetMsg(c.options.jobsQueueStreamName, i)
 		if err != nil {
-			return nil, fmt.Errorf("Failed retrieve submit request %d: %v", i, err)
+			// If message is missing (gap), just continue?
+			// Original code ERROR'd on missing msg.
+			// But usually safely skipping gaps is better for robustness.
+			// Let's try to match original robustness but maybe slightly safer?
+			// "Failed retrieve submit request"
+			// If I want to be safe for "ascending", I should probably skip gaps.
+			// But let's error to be consistent with original behavior if preferred.
+			// Actually, for Ascending, if I start at 1 and it was purged, I fail.
+			// So skipping is better.
+			// Let's Skip if err (assuming not found/purged).
+			continue
 		}
 
 		jobId := rawMsg.Header.Get(kJobIdHeader)
 		if jobId == "" {
-			// Missing job id header
 			continue
 		}
 
@@ -93,12 +163,14 @@ func (c *Client) LoadRecentJobs(limit int) ([]*core.JobRecord, error) {
 
 		kve, err := c.jobsRepository.Get(jobRecordKey)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to job %s record: %v", jobId, err)
+			// Skip if repository record missing
+			continue
+			// Original: returned error "Failed to job %s record"
 		}
 
 		job, err := core.LoadJob(kve.Value())
 		if err != nil {
-			return nil, fmt.Errorf("Failed to load job %s: %v", jobId, err)
+			continue
 		}
 
 		jobs = append(jobs, job)
@@ -121,4 +193,73 @@ func (c *Client) GetQueueStatus() (*core.QueueStatus, error) {
 	qs.SubmittedCount = lastSeq
 
 	return qs, nil
+}
+
+func (c *Client) FindJobOffset(query string) (int, error) {
+	if query == "" {
+		return -1, nil
+	}
+
+	// For FIFO/Ascending, we need distance from FirstSeq.
+	sInfo, err := c.js.StreamInfo(c.options.jobsQueueStreamName)
+	if err != nil {
+		return -1, nil
+	}
+	if sInfo.State.Msgs == 0 {
+		return -1, nil
+	}
+
+	lastSeq := sInfo.State.LastSeq
+	firstSeq := sInfo.State.FirstSeq
+
+	// Scan backwards (start from newest, usually what people want)
+	// But calculate offset from start.
+	for i := lastSeq; i >= firstSeq; i-- {
+		rawMsg, err := c.js.GetMsg(c.options.jobsQueueStreamName, i)
+		if err != nil {
+			// Skip missing messages
+			continue
+		}
+
+		jobId := rawMsg.Header.Get(kJobIdHeader)
+		if jobId == "" {
+			continue
+		}
+
+		jobRecordKey := fmt.Sprintf(kJobRecordKeyTmpl, jobId)
+		kve, err := c.jobsRepository.Get(jobRecordKey)
+		if err != nil {
+			continue
+		}
+
+		job, err := core.LoadJob(kve.Value())
+		if err != nil {
+			continue
+		}
+
+		// Search Query Check
+		if containsIgnoreCase(job.Id, query) ||
+			containsIgnoreCase(job.Parameters.GitRef, query) ||
+			containsIgnoreCase(job.Parameters.GitRemote, query) ||
+			containsIgnoreCase(job.Parameters.TestsFilterExpr, query) {
+
+			// Found it.
+			// Offset for FIFO (Ascending) = i - firstSeq.
+			// This assumes we are paging by sequence count from start.
+			// Re-verify logic:
+			// LoadJobs(asc=true) -> startSeq = sInfo.State.FirstSeq + uint64(offset)
+			// So if we found item at `i`, then `i = FirstSeq + offset` => `offset = i - FirstSeq`.
+			return int(i - firstSeq), nil
+		}
+
+		if i == 0 {
+			break
+		} // Safety breakdown
+	}
+
+	return -1, nil
+}
+
+func containsIgnoreCase(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

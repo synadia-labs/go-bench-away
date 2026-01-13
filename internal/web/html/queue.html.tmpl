@@ -17,14 +17,150 @@
   <body>
     <h1>Go Bench Away</h1>
     <h2>Jobs queue ({{.QueueName}})</h2>
+
+    <div style="margin: 20px 0; text-align: left;">
+      <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+        <label for="limitSelect">Results per page:</label>
+        <select id="limitSelect" onchange="updateLimit(this.value)">
+          <option value="10" {{if eq .Limit 10}}selected{{end}}>10</option>
+          <option value="25" {{if eq .Limit 25}}selected{{end}}>25</option>
+          <option value="50" {{if eq .Limit 50}}selected{{end}}>50</option>
+          <option value="100" {{if eq .Limit 100}}selected{{end}}>100</option>
+        </select>
+        
+        <input type="text" id="searchInput" placeholder="Find on page..." style="margin-left: 20px; padding: 5px;">
+      </div>
+
+      {{if gt .CurrentPage 1}}
+        <a href="/queue?offset={{sub .Offset .Limit}}&limit={{.Limit}}">Previous</a>
+      {{else}}
+        Previous
+      {{end}}
+
+      | 
+      {{range .PaginationTokens}}
+        {{if eq (printf "%v" .) "..."}}
+          ...
+        {{else if eq . $.CurrentPage}}
+          <b>{{.}}</b>
+        {{else}}
+          <a href="/queue?offset={{mul (sub . 1) $.Limit}}&limit={{$.Limit}}">{{.}}</a>
+        {{end}}
+      {{end}}
+      |
+
+      {{if lt .CurrentPage .TotalPages}}
+        <a href="/queue?offset={{add .Offset .Limit}}&limit={{.Limit}}">Next</a>
+      {{else}}
+        Next
+      {{end}}
+      
+      (Total: {{.TotalCount}})
+    </div>
+
     <table class="queue_table">
-      {{range .Jobs}}
+      {{range $i, $e := .Jobs}}
       <tr><td>
-      {{template "job" .}}
+      {{$seq := add (add $.Offset $i) 1}}
+      {{template "job" (dict "Job" $e "Seq" $seq "Total" $.TotalCount)}}
       </td></tr>
       {{end}}
     </table>
   </body>
+    <script>
+      function updateLimit(newLimit) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('limit', newLimit);
+        url.searchParams.set('offset', '0'); // Reset to first page
+        window.location.href = url.toString();
+      }
+
+      document.getElementById('searchInput').addEventListener('input', function(e) {
+        highlightFromInput(e.target.value);
+      });
+      
+      // Auto-highlight from URL param
+      window.onload = function() {
+        const params = new URLSearchParams(window.location.search);
+        const highlight = params.get('highlight');
+        if (highlight) {
+            const input = document.getElementById('searchInput');
+            input.value = highlight;
+            highlightFromInput(highlight);
+            
+            // Auto-scroll to first match
+            const firstMatch = document.querySelector('.highlight-search');
+            if (firstMatch) {
+                firstMatch.scrollIntoView({behavior: 'smooth', block: 'center'});
+            }
+        }
+      };
+
+      document.getElementById('searchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            const val = e.target.value.trim();
+            if (val) {
+                // Trigger server-side global search
+                const url = new URL(window.location.href);
+                url.searchParams.set('search', val);
+                // Remove highlight param to allow clean redirected search
+                url.searchParams.delete('highlight'); 
+                window.location.href = url.toString();
+            }
+        }
+      });
+
+      function highlightFromInput(val) {
+        const searchText = val.toLowerCase();
+        const table = document.querySelector('table.queue_table');
+        const rows = table.querySelectorAll('tr');
+
+        rows.forEach(row => {
+            removeHighlights(row);
+            if (searchText === "") return;
+            highlightText(row, searchText);
+        });
+      }
+
+      function removeHighlights(node) {
+        if (node.nodeType === 3) return; // Text node
+        
+        const highlights = node.querySelectorAll('.highlight-search');
+        highlights.forEach(span => {
+            const parent = span.parentNode;
+            parent.replaceChild(document.createTextNode(span.textContent), span);
+            parent.normalize(); // Merge adjacent text nodes
+        });
+      }
+
+      function highlightText(node, searchText) {
+        if (node.nodeType === 3) { // Text node
+             const text = node.nodeValue;
+             const lowerText = text.toLowerCase();
+             const index = lowerText.indexOf(searchText);
+             
+             if (index >= 0) {
+                 const span = document.createElement('span');
+                 span.className = 'highlight-search';
+                 span.style.backgroundColor = 'yellow';
+                 span.textContent = text.substring(index, index + searchText.length);
+                 
+                 const after = document.createTextNode(text.substring(index + searchText.length));
+                 const before = document.createTextNode(text.substring(0, index));
+                 
+                 const parent = node.parentNode;
+                 parent.replaceChild(after, node);
+                 parent.insertBefore(span, after);
+                 parent.insertBefore(before, span);
+                 
+                 // Continue searching in 'after' node? For multiple matches in same text node.
+                 highlightText(after, searchText);
+             }
+        } else if (node.nodeType === 1 && node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE') { // Element node
+             Array.from(node.childNodes).forEach(child => highlightText(child, searchText));
+        }
+      }
+    </script>
 </html>
 
 {{define "submitted_job"}}
@@ -34,26 +170,32 @@
 {{define "job"}}
     <table class="job_table">
       <tr>
-        <td colspan=2><h3>{{ .Status.Icon }} {{.Id}}</h3></td>
+        <td colspan=2>
+            <h3>
+                <span style="font-size: 0.8em; color: #888;">#{{.Seq}} of {{.Total}}</span>
+                &nbsp;
+                {{.Job.Status.Icon}} {{.Job.Id}}
+            </h3>
+        </td>
       </tr>
       <tr>
-        <td colspan=2>{{template "job_status_message" .}}</td>
+        <td colspan=2>{{template "job_status_message" .Job}}</td>
       </tr>
       <tr>
-        <th>Source:</th><td><b>{{.Parameters.GitRef}}</b> from {{.Parameters.GitRemote}}</td>
+        <th>Source:</th><td><b>{{.Job.Parameters.GitRef}}</b> from {{.Job.Parameters.GitRemote}}</td>
       </tr>
       <tr>
-        <th>Filter:</th><td>'<b>{{.Parameters.TestsFilterExpr}}</b>' in directory {{.Parameters.TestsSubDir}}</td>
+        <th>Filter:</th><td>'<b>{{.Job.Parameters.TestsFilterExpr}}</b>' in directory {{.Job.Parameters.TestsSubDir}}</td>
       </tr>
       <tr>
-        <th>Repetitions:</th><td><b>{{.Parameters.Reps}}</b> x {{.Parameters.TestMinRuntime}}</td>
+        <th>Repetitions:</th><td><b>{{.Job.Parameters.Reps}}</b> x {{.Job.Parameters.TestMinRuntime}}</td>
       </tr>
       <tr>
-        <th>Artifacts:</th><td>{{template "record_artifact" .}}{{template "log_artifact" .}}{{template "results_artifact" .}}{{template "script_artifact" .}}</td>
+        <th>Artifacts:</th><td>{{template "record_artifact" .Job}}{{template "log_artifact" .Job}}{{template "results_artifact" .Job}}{{template "script_artifact" .Job}}</td>
       </tr>
-      {{if ne .Results ""}}
+      {{if ne .Job.Results ""}}
       <tr>
-        <th>Results</th><td>{{template "plot_results" .}}</td>
+        <th>Results</th><td>{{template "plot_results" .Job}}</td>
       </tr>
       {{end}}
     </table>

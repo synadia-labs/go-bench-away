@@ -62,7 +62,7 @@ func (cmd *listCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}
 	}
 	defer c.Close()
 
-	jobs, err := c.LoadRecentJobs(cmd.limit)
+	jobs, err := c.LoadRecentJobs(cmd.limit, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return subcommands.ExitFailure
