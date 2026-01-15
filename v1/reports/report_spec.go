@@ -52,7 +52,7 @@ func (spec *ReportSpec) ConfigureReport(reportCfg *ReportConfig) error {
 	)
 
 	// Set custom labels, if present
-	if spec.Labels != nil && len(spec.Labels) > 0 {
+	if len(spec.Labels) > 0 {
 		reportCfg.SetCustomLabels(spec.Labels)
 	}
 

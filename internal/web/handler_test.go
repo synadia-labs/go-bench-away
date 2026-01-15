@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 )
 
 type mockWebClient struct {
@@ -37,7 +37,9 @@ func (m *mockWebClient) CancelJob(id string) error                              
 func (m *mockWebClient) QueueName() string                                          { return "test-queue" }
 func (m *mockWebClient) FindJobOffset(query string) (int, error)                    { return -1, nil }
 func (m *mockWebClient) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error) {
-	return []*core.JobRecord{}, nil
+	m.CapturedLimit = limit
+	m.CapturedOffset = offset
+	return m.ReturnJobs, m.ReturnLoadJobsErr
 }
 
 func TestServeQueuePagination(t *testing.T) {

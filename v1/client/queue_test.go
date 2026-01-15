@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mprimi/go-bench-away/v1/core"
 	server "github.com/nats-io/nats-server/v2/test"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 )
 
 func TestSubmit(t *testing.T) {
@@ -64,7 +64,7 @@ func TestSubmit(t *testing.T) {
 
 	// Dummy job parameters (test really cares about state)
 	jobParams := core.JobParameters{
-		GitRemote:       "https://github.com/mprimi/go-bench-away.git",
+		GitRemote:       "https://github.com/synadia-labs/go-bench-away.git",
 		GitRef:          "main",
 		TestsSubDir:     "internal/core",
 		TestsFilterExpr: ".*",

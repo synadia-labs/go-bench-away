@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mprimi/go-bench-away/internal/web"
-	"github.com/mprimi/go-bench-away/v1/client"
+	"github.com/synadia-labs/go-bench-away/internal/web"
+	"github.com/synadia-labs/go-bench-away/v1/client"
 
 	"github.com/google/subcommands"
 )

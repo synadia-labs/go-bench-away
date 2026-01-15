@@ -44,10 +44,10 @@ name go-bench-*away*.
 
 # Installation
 
-Download the latest [release](https://github.com/mprimi/go-bench-away/releases) or install from source with:
+Download the latest [release](https://github.com/synadia-labs/go-bench-away/releases) or install from source with:
 
 ```
-$ go install github.com/mprimi/go-bench-away@vX.Y.Z
+$ go install github.com/synadia-labs/go-bench-away@vX.Y.Z
 ```
 
 ## NATS Server setup

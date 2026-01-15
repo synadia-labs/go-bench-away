@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 
 	"github.com/nats-io/nats.go"
 )

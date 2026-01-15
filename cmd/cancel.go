@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/google/subcommands"
-	"github.com/mprimi/go-bench-away/v1/client"
+	"github.com/synadia-labs/go-bench-away/v1/client"
 )
 
 type cancelCmd struct {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 	"golang.org/x/perf/benchstat"
 )
 

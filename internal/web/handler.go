@@ -7,10 +7,11 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
-	"github.com/mprimi/go-bench-away/v1/core"
-	"github.com/mprimi/go-bench-away/v1/reports"
+	"github.com/synadia-labs/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/reports"
 )
 
 //go:embed html/index.html.tmpl
@@ -109,12 +110,16 @@ func (h *handler) serveQueue(w http.ResponseWriter, r *http.Request) error {
 
 	offsetStr := r.URL.Query().Get("offset")
 	if offsetStr != "" {
-		fmt.Sscanf(offsetStr, "%d", &offset)
+		if val, err := strconv.Atoi(offsetStr); err == nil {
+			offset = val
+		}
 	}
 
 	limitStr := r.URL.Query().Get("limit")
 	if limitStr != "" {
-		fmt.Sscanf(limitStr, "%d", &limit)
+		if val, err := strconv.Atoi(limitStr); err == nil {
+			limit = val
+		}
 	}
 
 	// Handle Global Search
