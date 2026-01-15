@@ -20,10 +20,7 @@ var indexTmpl string
 //go:embed html/queue.html.tmpl
 var queueTmpl string
 
-var jobResourceRegexp = regexp.MustCompile(
-	`^/job/([[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}` +
-		`-[[:xdigit:]]{12})/(log|script|results|record|plot|cancel)/?$`,
-)
+var jobResourceRegexp = regexp.MustCompile(`^/job/([[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12})/(log|script|results|record|plot|cancel)/?$`) //nolint:lll
 
 type handler struct {
 	client        WebClient
