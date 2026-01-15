@@ -66,7 +66,7 @@ func TestSubmit(t *testing.T) {
 	jobParams := core.JobParameters{
 		GitRemote:       "https://github.com/synadia-labs/go-bench-away.git",
 		GitRef:          "main",
-		TestsSubDir:     "internal/core",
+		TestsSubDir:     "v1/core",
 		TestsFilterExpr: ".*",
 		Reps:            3,
 		TestMinRuntime:  1 * time.Second,

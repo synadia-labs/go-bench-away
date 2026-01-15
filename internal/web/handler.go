@@ -20,7 +20,10 @@ var indexTmpl string
 //go:embed html/queue.html.tmpl
 var queueTmpl string
 
-var jobResourceRegexp = regexp.MustCompile(`^/job/([[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12})/(log|script|results|record|plot|cancel)/?$`)
+var jobResourceRegexp = regexp.MustCompile(
+	`^/job/([[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}` +
+		`-[[:xdigit:]]{12})/(log|script|results|record|plot|cancel)/?$`,
+)
 
 type handler struct {
 	client        WebClient
@@ -142,7 +145,8 @@ func (h *handler) serveQueue(w http.ResponseWriter, r *http.Request) error {
 
 			// Redirect to the page containing the item
 			// Preserve highlight
-			redirectUrl := fmt.Sprintf("/queue?offset=%d&limit=%d&highlight=%s", newOffset, limit, searchQuery) // using 'highlight' not 'search' to avoid loop
+			redirectUrl := fmt.Sprintf("/queue?offset=%d&limit=%d&highlight=%s",
+				newOffset, limit, searchQuery) // using 'highlight' not 'search' to avoid loop
 			http.Redirect(w, r, redirectUrl, http.StatusFound)
 			return nil
 		}
