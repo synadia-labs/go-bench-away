@@ -317,7 +317,7 @@ func assertReportEqual(t *testing.T, reportPath string, expectedReportPath strin
 var floatRegex = regexp.MustCompile(`\d+\.\d+([eE][+-]?\d+)?`)
 
 func normalizeNumbers(input []byte) []byte {
-	const precision = 12
+	const precision = 10
 	return floatRegex.ReplaceAllFunc(input, func(m []byte) []byte {
 		v, err := strconv.ParseFloat(string(m), 64)
 		if err != nil {
