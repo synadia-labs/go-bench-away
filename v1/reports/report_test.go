@@ -296,11 +296,25 @@ func assertReportEqual(t *testing.T, reportPath string, expectedReportPath strin
 				t.Log(err)
 			}
 		}
+
+		// Diagnostics: show the first difference
+		reportLines := bytes.Split(normalizedReport, []byte("\n"))
+		expectedLines := bytes.Split(normalizedExpected, []byte("\n"))
+		for i := 0; i < len(reportLines) && i < len(expectedLines); i++ {
+			if !bytes.Equal(reportLines[i], expectedLines[i]) {
+				t.Errorf("First mismatch at line %d:\nGot:  %s\nWant: %s", i+1, string(reportLines[i]), string(expectedLines[i]))
+				break
+			}
+		}
+		if len(reportLines) != len(expectedLines) {
+			t.Errorf("Line count mismatch: Got %d, Want %d", len(reportLines), len(expectedLines))
+		}
+
 		t.Fatalf("Report %s does not match expected %s (normalized comparison failed)", reportPath, expectedReportPath)
 	}
 }
 
-var floatRegex = regexp.MustCompile(`\d+\.\d+`)
+var floatRegex = regexp.MustCompile(`\d+\.\d+([eE][+-]?\d+)?`)
 
 func normalizeNumbers(input []byte) []byte {
 	const precision = 12
