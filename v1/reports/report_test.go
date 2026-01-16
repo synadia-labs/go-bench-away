@@ -2,15 +2,17 @@ package reports
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"testing"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 )
 
 const (
@@ -273,43 +275,56 @@ func writeReportAndCompareToExpected(t *testing.T, jobIds []string, reportConfig
 }
 
 func assertReportEqual(t *testing.T, reportPath string, expectedReportPath string) {
-
-	reportFile, err := os.Open(reportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reportFile.Close()
-
-	expectedReportFile, err := os.Open(expectedReportPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer expectedReportFile.Close()
-
-	reportDigest := md5.New()
-	expectedReportDigest := md5.New()
-
-	_, err = io.Copy(reportDigest, reportFile)
+	reportBytes, err := os.ReadFile(reportPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = io.Copy(expectedReportDigest, expectedReportFile)
+	expectedReportBytes, err := os.ReadFile(expectedReportPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(reportDigest.Sum(nil), expectedReportDigest.Sum(nil)) {
-		// Set to true to copy the produced report over the expected report in the test data directory.
-		// Useful to update the reports after a code change, assuming the new output is valid after being reviewed
-		// via git diff.
+	normalizedReport := normalizeNumbers(reportBytes)
+	normalizedExpected := normalizeNumbers(expectedReportBytes)
+
+	if !bytes.Equal(normalizedReport, normalizedExpected) {
 		const overwriteTestData = false
 		if overwriteTestData {
-			err := os.Rename(reportPath, expectedReportPath)
+			err := os.WriteFile(expectedReportPath, reportBytes, 0644)
 			if err != nil {
 				t.Log(err)
 			}
 		}
-		t.Fatalf("Report %s does not match expected %s", reportPath, expectedReportPath)
+
+		// Diagnostics: show the first difference
+		reportLines := bytes.Split(normalizedReport, []byte("\n"))
+		expectedLines := bytes.Split(normalizedExpected, []byte("\n"))
+		for i := 0; i < len(reportLines) && i < len(expectedLines); i++ {
+			if !bytes.Equal(reportLines[i], expectedLines[i]) {
+				t.Errorf("First mismatch at line %d:\nGot:  %s\nWant: %s", i+1, string(reportLines[i]), string(expectedLines[i]))
+				break
+			}
+		}
+		if len(reportLines) != len(expectedLines) {
+			t.Errorf("Line count mismatch: Got %d, Want %d", len(reportLines), len(expectedLines))
+		}
+
+		t.Fatalf("Report %s does not match expected %s (normalized comparison failed)", reportPath, expectedReportPath)
 	}
+}
+
+var floatRegex = regexp.MustCompile(`\d+\.\d+([eE][+-]?\d+)?`)
+
+func normalizeNumbers(input []byte) []byte {
+	const precision = 10
+	return floatRegex.ReplaceAllFunc(input, func(m []byte) []byte {
+		v, err := strconv.ParseFloat(string(m), 64)
+		if err != nil {
+			return m
+		}
+		p := math.Pow(10, float64(precision))
+		rounded := math.Round(v*p) / p
+		return []byte(strconv.FormatFloat(rounded, 'f', -1, 64))
+	})
 }

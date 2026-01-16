@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/mprimi/go-bench-away/cmd"
+	"github.com/synadia-labs/go-bench-away/cmd"
 )
 
 func main() {

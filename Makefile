@@ -1,4 +1,4 @@
-project?=github.com/mprimi/go-bench-away
+project?=github.com/synadia-labs/go-bench-away
 projectname?=go-bench-away
 version?=dev
 sha?=$(shell git rev-parse --short HEAD)

@@ -2,9 +2,20 @@ linters-settings:
   lll:
     line-length: 130
   staticcheck:
-    checks:
-     - all
-     - '-SA1019'
+    checks: ["all", "-SA1019"]
 
-# See https://golangci-lint.run/usage/linters for more
 linters:
+  enable:
+    - staticcheck
+    - lll
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - unused
+
+issues:
+  exclude-rules:
+    - linters:
+        - staticcheck
+      text: "SA1019:"

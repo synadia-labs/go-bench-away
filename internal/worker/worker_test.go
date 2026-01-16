@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 )
 
 type mockClient struct {
@@ -60,9 +60,9 @@ func TestProcessJob(t *testing.T) {
 	cleanupHookFilePath := filepath.Join(t.TempDir(), "canary.txt")
 
 	jobParams := core.JobParameters{
-		GitRemote:       "https://github.com/mprimi/go-bench-away.git",
+		GitRemote:       "https://github.com/synadia-labs/go-bench-away.git",
 		GitRef:          "main",
-		TestsSubDir:     "internal/core",
+		TestsSubDir:     "v1/core",
 		TestsFilterExpr: ".*",
 		Reps:            3,
 		TestMinRuntime:  1 * time.Second,
@@ -94,7 +94,7 @@ func TestFilterDisallowedJobs(t *testing.T) {
 	jobsDir := t.TempDir()
 
 	allowedGitRemotes := []string{
-		".*://github\\.com/(mprimi|ReubenMathew)/.*",
+		".*://github\\.com/(synadia-labs|ReubenMathew)/.*",
 		".*://github\\.com/SomeOrg/SomeProject.git$",
 	}
 
@@ -113,7 +113,7 @@ func TestFilterDisallowedJobs(t *testing.T) {
 		ExpectedStatus core.JobStatus
 	}{
 		{
-			"https://github.com/mprimi/go-bench-away.git",
+			"https://github.com/synadia-labs/go-bench-away.git",
 			core.Succeeded,
 		},
 		{
@@ -146,7 +146,7 @@ func TestFilterDisallowedJobs(t *testing.T) {
 				jobParams := core.JobParameters{
 					GitRemote:       testCase.GitRemote,
 					GitRef:          "main",
-					TestsSubDir:     "internal/core",
+					TestsSubDir:     "v1/core",
 					TestsFilterExpr: ".*",
 					Reps:            3,
 					TestMinRuntime:  1 * time.Second,

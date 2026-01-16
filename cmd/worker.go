@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mprimi/go-bench-away/internal/worker"
-	"github.com/mprimi/go-bench-away/v1/client"
+	"github.com/synadia-labs/go-bench-away/internal/worker"
+	"github.com/synadia-labs/go-bench-away/v1/client"
 
 	"github.com/google/subcommands"
 )

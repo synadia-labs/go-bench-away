@@ -12,7 +12,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 	"golang.org/x/sys/unix"
 )
 
@@ -293,7 +293,7 @@ func (w *workerImpl) uploadArtifacts(job *core.JobRecord, jobDirPath string) err
 
 func (w *workerImpl) isAllowed(job *core.JobRecord) (bool, error) {
 
-	if w.allowedGitRemoteRegexes != nil && len(w.allowedGitRemoteRegexes) > 0 {
+	if len(w.allowedGitRemoteRegexes) > 0 {
 		for _, regex := range w.allowedGitRemoteRegexes {
 			if regex.MatchString(job.Parameters.GitRemote) {
 				// Matches regex from list, allow
