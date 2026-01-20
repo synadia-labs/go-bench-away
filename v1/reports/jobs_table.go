@@ -1,7 +1,7 @@
 package reports
 
 import (
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 )
 
 type jobsTableSection struct {

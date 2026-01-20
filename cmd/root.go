@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 
 	"github.com/google/subcommands"
 )
@@ -65,7 +65,8 @@ func Run(args []string) int {
 	rootFlagSet.BoolVar(&rootOptions.verbose, "v", false, "verbose")
 	rootFlagSet.StringVar(&rootOptions.natsServerUrl, "server", "nats://localhost:4222", "NATS server URL")
 	rootFlagSet.StringVar(&rootOptions.credentials, "creds", "", "Path to credentials file")
-	rootFlagSet.StringVar(&rootOptions.namespace, "namespace", "default", "Namespace (allows isolated sets of jobs to share a NATS server)")
+	rootFlagSet.StringVar(&rootOptions.namespace, "namespace", "default",
+		"Namespace (allows isolated sets of jobs to share a NATS server)")
 
 	cmdr := subcommands.NewCommander(rootFlagSet, core.Name)
 	cmdr.ImportantFlag("server")

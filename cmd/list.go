@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mprimi/go-bench-away/v1/client"
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/client"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 
 	"github.com/google/subcommands"
 )
@@ -62,7 +62,7 @@ func (cmd *listCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}
 	}
 	defer c.Close()
 
-	jobs, err := c.LoadRecentJobs(cmd.limit)
+	jobs, err := c.LoadRecentJobs(cmd.limit, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return subcommands.ExitFailure

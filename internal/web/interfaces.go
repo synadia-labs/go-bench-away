@@ -3,13 +3,15 @@ package web
 import (
 	"io"
 
-	"github.com/mprimi/go-bench-away/v1/core"
+	"github.com/synadia-labs/go-bench-away/v1/core"
 )
 
 type WebClient interface {
 	LoadJob(jobId string) (*core.JobRecord, uint64, error)
 	GetQueueStatus() (*core.QueueStatus, error)
-	LoadRecentJobs(limit int) ([]*core.JobRecord, error)
+	FindJobOffset(query string) (int, error)
+	LoadRecentJobs(limit, offset int) ([]*core.JobRecord, error)
+	LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error)
 	LoadResultsArtifact(job *core.JobRecord, w io.Writer) error
 	LoadLogArtifact(job *core.JobRecord, w io.Writer) error
 	LoadScriptArtifact(job *core.JobRecord, w io.Writer) error
