@@ -103,6 +103,10 @@ jobs:
               core.setOutput('additional_context', additionalContext);
             } else if (request.startsWith("@gemini-cli /triage")) {
               core.setOutput('command', 'triage');
+            } else if (request.startsWith("@gemini-cli /shrink-optimizer")) {
+              core.setOutput('command', 'shrink-optimizer');
+              const additionalContext = request.replace(/^@gemini-cli \/shrink-optimizer/, '').trim();
+              core.setOutput('additional_context', additionalContext);
             } else if (request.startsWith("@gemini-cli")) {
               const additionalContext = request.replace(/^@gemini-cli/, '').trim();
               core.setOutput('command', 'invoke');
@@ -156,6 +160,21 @@ jobs:
     if: |-
       ${{ needs.dispatch.outputs.command == 'invoke' }}
     uses: './.github/workflows/gemini-invoke.yml'
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+      issues: 'write'
+      pull-requests: 'write'
+    with:
+      prompt: '/gemini-algorithm'
+      additional_context: '${{ needs.dispatch.outputs.additional_context }}'
+    secrets: 'inherit'
+
+  shrink-optimizer:
+    needs: 'dispatch'
+    if: |-
+      ${{ needs.dispatch.outputs.command == 'shrink-optimizer' }}
+    uses: './.github/workflows/gemini-shrink-optimizer.yml'
     permissions:
       contents: 'read'
       id-token: 'write'
