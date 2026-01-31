@@ -133,4 +133,28 @@ do
 done
 ```
 
+
+## Migration
+
+To migrate `go-bench-away` (specifically the worker or server) to a new host, use the provided helper script.
+
+### 1. Pre-flight Check
+On the **new host**, run the checks to ensure `go` and `git` and network connectivity are available:
+
+```sh
+./scripts/util.sh check
 ```
+
+### 2. Backup & Transfer
+On the **old host** (existing installation), create a migration archive:
+
+```sh
+./scripts/util.sh backup
+```
+
+This will create a `migration_backup_<timestamp>.tar.gz` containing:
+*   Environment variables (NATS/Go/Git related)
+*   NATS Server config (if detected)
+*   **Note**: You must manually verify if the JetStream `store_dir` needs to be copied separately if it wasn't automatically detected.
+
+Transfer this archive to your new host and restore as needed.
