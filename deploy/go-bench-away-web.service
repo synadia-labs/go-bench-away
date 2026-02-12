@@ -1,0 +1,17 @@
+[Unit]
+Description=Go Bench Away Web UI
+After=nats-server.service
+Wants=nats-server.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/go-bench-away \
+  -server nats://0283509234734458@localhost \
+  web --port 8888
+Restart=on-failure
+RestartSec=5
+User=bench
+Group=bench
+
+[Install]
+WantedBy=multi-user.target

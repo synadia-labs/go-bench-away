@@ -19,6 +19,7 @@ type mockWebClient struct {
 	ReturnQueueStatus  *core.QueueStatus
 	ReturnQueueStatErr error
 	ReturnJobs         []*core.JobRecord
+	ReturnStatusCounts map[core.JobStatus]int
 }
 
 func (m *mockWebClient) LoadJob(jobId string) (*core.JobRecord, uint64, error) { return nil, 0, nil }
@@ -41,6 +42,23 @@ func (m *mockWebClient) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord
 	m.CapturedOffset = offset
 	return m.ReturnJobs, m.ReturnLoadJobsErr
 }
+func (m *mockWebClient) LoadJobsFiltered(limit, offset int, asc bool, statuses []core.JobStatus) ([]*core.JobRecord, int, error) {
+	return m.ReturnJobs, 0, m.ReturnLoadJobsErr
+}
+func (m *mockWebClient) CountJobsByStatus() (map[core.JobStatus]int, error) {
+	return nil, nil
+}
+func (m *mockWebClient) LoadJobsByKV( //nolint:lll
+	limit, offset int, statuses []core.JobStatus,
+) ([]*core.JobRecord, map[core.JobStatus]int, error) {
+	m.CapturedLimit = limit
+	m.CapturedOffset = offset
+	counts := m.ReturnStatusCounts
+	if counts == nil {
+		counts = map[core.JobStatus]int{}
+	}
+	return m.ReturnJobs, counts, m.ReturnLoadJobsErr
+}
 
 func TestServeQueuePagination(t *testing.T) {
 	tests := []struct {
@@ -57,9 +75,11 @@ func TestServeQueuePagination(t *testing.T) {
 		unexpectedSubstr []string // strings NOT expected in response
 	}{
 		{
-			name:           "Default values",
-			queryParams:    map[string]string{},
-			mockTotalObj:   &core.QueueStatus{SubmittedCount: 100},
+			name:        "Default values",
+			queryParams: map[string]string{},
+			mockTotalObj: &core.QueueStatus{
+				SubmittedCount: 100,
+			},
 			expectedStatus: http.StatusOK,
 			expectedLimit:  10,
 			expectedOffset: 0,
@@ -67,27 +87,31 @@ func TestServeQueuePagination(t *testing.T) {
 				">Next</a>",
 			},
 			unexpectedSubstr: []string{
-				">Previous</a>", // First page shouldn't have Previous link
+				">Previous</a>",
 			},
 		},
 		{
-			name:           "Page 2 (Middle)",
-			queryParams:    map[string]string{"limit": "10", "offset": "10"},
-			mockTotalObj:   &core.QueueStatus{SubmittedCount: 100},
+			name:        "Page 2 (Middle)",
+			queryParams: map[string]string{"limit": "10", "offset": "10", "status": "all"},
+			mockTotalObj: &core.QueueStatus{
+				SubmittedCount: 100,
+			},
 			expectedStatus: http.StatusOK,
 			expectedLimit:  10,
 			expectedOffset: 10,
 			expectedSubstr: []string{
 				">Previous</a>",
 				">Next</a>",
-				"offset=0",  // Previous link
-				"offset=20", // Next link
+				"offset=0",
+				"offset=20",
 			},
 		},
 		{
-			name:           "Last Page",
-			queryParams:    map[string]string{"limit": "10", "offset": "90"},
-			mockTotalObj:   &core.QueueStatus{SubmittedCount: 100},
+			name:        "Last Page",
+			queryParams: map[string]string{"limit": "10", "offset": "90", "status": "all"},
+			mockTotalObj: &core.QueueStatus{
+				SubmittedCount: 100,
+			},
 			expectedStatus: http.StatusOK,
 			expectedLimit:  10,
 			expectedOffset: 90,
@@ -96,20 +120,13 @@ func TestServeQueuePagination(t *testing.T) {
 				"offset=80",
 			},
 			unexpectedSubstr: []string{
-				">Next</a>", // Last page shouldn't have Next link
+				">Next</a>",
 			},
 		},
 		{
-			name:           "LoadRecentJobs Error",
+			name:           "LoadJobsByKV Error",
 			queryParams:    map[string]string{},
 			mockLoadErr:    errors.New("db error"),
-			expectedStatus: http.StatusInternalServerError,
-		},
-		{
-			name:           "GetQueueStatus Error",
-			queryParams:    map[string]string{},
-			mockJobs:       []*core.JobRecord{},
-			mockStatusErr:  errors.New("nats error"),
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
@@ -123,11 +140,18 @@ func TestServeQueuePagination(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			var statusCounts map[core.JobStatus]int
+			if tc.mockTotalObj != nil {
+				statusCounts = map[core.JobStatus]int{
+					core.Submitted: int(tc.mockTotalObj.SubmittedCount),
+				}
+			}
 			mock := &mockWebClient{
 				ReturnJobs:         tc.mockJobs,
 				ReturnQueueStatus:  tc.mockTotalObj,
 				ReturnLoadJobsErr:  tc.mockLoadErr,
 				ReturnQueueStatErr: tc.mockStatusErr,
+				ReturnStatusCounts: statusCounts,
 			}
 			h := NewHandler(mock)
 

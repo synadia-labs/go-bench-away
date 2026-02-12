@@ -56,7 +56,6 @@ func NewHandler(c WebClient) http.Handler {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Reject anything that is not a GET
 	if r.Method != http.MethodGet {
 		http.Error(w, fmt.Sprintf("Invalid request method: %s", r.Method), http.StatusMethodNotAllowed)
 		return
@@ -122,7 +121,15 @@ func (h *handler) serveQueue(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	// Handle Global Search
+	statusParam := r.URL.Query().Get("status")
+	if statusParam == "" {
+		statusParam = "submitted,running"
+	}
+	var statuses []core.JobStatus
+	if statusParam != "all" {
+		statuses = parseStatusFilter(statusParam)
+	}
+
 	searchQuery := strings.TrimSpace(r.URL.Query().Get("search"))
 	if searchQuery != "" {
 		foundOffset, err := h.client.FindJobOffset(searchQuery)
@@ -130,43 +137,37 @@ func (h *handler) serveQueue(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		if foundOffset >= 0 {
-			// Calculate page start for this offset
-			// Page number = (offset / limit) + 1
-			// New Offset = (Page number - 1) * limit
-			// Actually simpler:
-			// newOffset = (foundOffset / limit) * limit
 			if limit <= 0 {
 				limit = 10
 			}
 			newOffset := (foundOffset / limit) * limit
-
-			// Redirect to the page containing the item
-			// Preserve highlight
-			redirectUrl := fmt.Sprintf("/queue?offset=%d&limit=%d&highlight=%s",
-				newOffset, limit, searchQuery) // using 'highlight' not 'search' to avoid loop
+			redirectUrl := fmt.Sprintf("/queue?offset=%d&limit=%d&highlight=%s&status=%s",
+				newOffset, limit, searchQuery, statusParam)
 			http.Redirect(w, r, redirectUrl, http.StatusFound)
 			return nil
 		}
-		// Not found? Just show page 1 (default fallthrough) or maybe show error?
-		// For now, fallthrough but maybe we can pass a "flash" error.
-		// Let's just fallthrough to page 1 which is standard behavior if filter not matched.
 	}
 
-	jobRecords, err := h.client.LoadJobs(limit, offset, true)
+	jobRecords, statusCounts, err := h.client.LoadJobsByKV(limit, offset, statuses)
 	if err != nil {
 		return err
 	}
 
-	qs, err := h.client.GetQueueStatus()
-	if err != nil {
-		return err
+	totalFiltered := 0
+	if statusParam == "all" || len(statuses) == 0 {
+		for _, count := range statusCounts {
+			totalFiltered += count
+		}
+	} else {
+		for _, s := range statuses {
+			totalFiltered += statusCounts[s]
+		}
 	}
 
-	// Pagination logic
 	if limit <= 0 {
 		limit = 10
 	}
-	totalPages := int((qs.SubmittedCount + uint64(limit) - 1) / uint64(limit))
+	totalPages := (totalFiltered + limit - 1) / limit
 	currentPage := (offset / limit) + 1
 	paginationTokens := calculatePagination(currentPage, totalPages, 2)
 
@@ -179,38 +180,53 @@ func (h *handler) serveQueue(w http.ResponseWriter, r *http.Request) error {
 		CurrentPage      int
 		TotalPages       int
 		PaginationTokens []interface{}
+		StatusFilter     string
 	}{
 		QueueName:        h.client.QueueName(),
 		Jobs:             jobRecords,
 		Offset:           offset,
 		Limit:            limit,
-		TotalCount:       int(qs.SubmittedCount),
+		TotalCount:       totalFiltered,
 		CurrentPage:      currentPage,
 		TotalPages:       totalPages,
 		PaginationTokens: paginationTokens,
+		StatusFilter:     statusParam,
 	}
 	return h.queueTemplate.Execute(w, tv)
+}
+
+func parseStatusFilter(param string) []core.JobStatus {
+	statusMap := map[string]core.JobStatus{
+		"submitted": core.Submitted,
+		"running":   core.Running,
+		"failed":    core.Failed,
+		"succeeded": core.Succeeded,
+		"cancelled": core.Cancelled,
+	}
+	var statuses []core.JobStatus
+	for _, s := range strings.Split(param, ",") {
+		s = strings.TrimSpace(strings.ToLower(s))
+		if status, ok := statusMap[s]; ok {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses
 }
 
 func calculatePagination(current, total, window int) []interface{} {
 	var tokens []interface{}
 
-	// Always include first page
 	tokens = append(tokens, 1)
 
-	// Range start
 	start := current - window
 	if start > 2 {
 		tokens = append(tokens, "...")
 	} else {
-		// connect to 1
 		start = 2
 	}
 
-	// Range end
 	end := current + window
 	if end < total-1 {
-		// Room for ...
 	} else {
 		end = total - 1
 	}
@@ -225,7 +241,6 @@ func calculatePagination(current, total, window int) []interface{} {
 		tokens = append(tokens, "...")
 	}
 
-	// Always include last page if > 1
 	if total > 1 {
 		tokens = append(tokens, total)
 	}
@@ -293,11 +308,6 @@ func (h *handler) serveJobResultsPlot(jobId string, w http.ResponseWriter) error
 		reports.HorizontalBoxChart("", reports.TimeOp, ""),
 		reports.ResultsTable(reports.TimeOp, "", true),
 	)
-	// Re-checking Step 36 content for serveJobResultsPlot.
-	// Lines 152-157: Speed
-	// Lines 159-162: TimeOp.
-	// I will correct the second block to TimeOp.
-
 	err = reports.WriteReport(&cfg, dataTable, w)
 	if err != nil {
 		return err

@@ -77,6 +77,7 @@ func Run(args []string) int {
 		"maintenance": {
 			initCommand(),
 			wipeCommand(),
+			failStaleCommand(),
 		},
 		"submit, monitor, cancel": {
 			submitCommand(),

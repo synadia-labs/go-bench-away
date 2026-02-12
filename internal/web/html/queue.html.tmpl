@@ -20,44 +20,70 @@
 
     <div style="margin: 20px 0; text-align: left;">
       <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
-        <label for="limitSelect">Results per page:</label>
+        <label>Filter:</label>
+        {{if eq .StatusFilter "submitted,running"}}
+          <b>Active</b>
+        {{else}}
+          <a href="/queue?status=submitted,running&limit={{.Limit}}">Active</a>
+        {{end}}
+        |
+        {{if eq .StatusFilter "succeeded"}}
+          <b>Completed</b>
+        {{else}}
+          <a href="/queue?status=succeeded&limit={{.Limit}}">Completed</a>
+        {{end}}
+        |
+        {{if eq .StatusFilter "failed,cancelled"}}
+          <b>Failed</b>
+        {{else}}
+          <a href="/queue?status=failed,cancelled&limit={{.Limit}}">Failed</a>
+        {{end}}
+        |
+        {{if eq .StatusFilter "all"}}
+          <b>All</b>
+        {{else}}
+          <a href="/queue?status=all&limit={{.Limit}}">All</a>
+        {{end}}
+
+        <label for="limitSelect" style="margin-left: 20px;">Per page:</label>
         <select id="limitSelect" onchange="updateLimit(this.value)">
           <option value="10" {{if eq .Limit 10}}selected{{end}}>10</option>
           <option value="25" {{if eq .Limit 25}}selected{{end}}>25</option>
           <option value="50" {{if eq .Limit 50}}selected{{end}}>50</option>
           <option value="100" {{if eq .Limit 100}}selected{{end}}>100</option>
         </select>
-        
+
         <input type="text" id="searchInput" placeholder="Find on page..." style="margin-left: 20px; padding: 5px;">
       </div>
 
       {{if gt .CurrentPage 1}}
-        <a href="/queue?offset={{sub .Offset .Limit}}&limit={{.Limit}}">Previous</a>
+        <a href="/queue?offset={{sub .Offset .Limit}}&limit={{.Limit}}&status={{.StatusFilter}}">Previous</a>
       {{else}}
         Previous
       {{end}}
 
-      | 
+      |
       {{range .PaginationTokens}}
         {{if eq (printf "%v" .) "..."}}
           ...
         {{else if eq . $.CurrentPage}}
           <b>{{.}}</b>
         {{else}}
-          <a href="/queue?offset={{mul (sub . 1) $.Limit}}&limit={{$.Limit}}">{{.}}</a>
+          <a href="/queue?offset={{mul (sub . 1) $.Limit}}&limit={{$.Limit}}&status={{$.StatusFilter}}">{{.}}</a>
         {{end}}
       {{end}}
       |
 
       {{if lt .CurrentPage .TotalPages}}
-        <a href="/queue?offset={{add .Offset .Limit}}&limit={{.Limit}}">Next</a>
+        <a href="/queue?offset={{add .Offset .Limit}}&limit={{.Limit}}&status={{.StatusFilter}}">Next</a>
       {{else}}
         Next
       {{end}}
-      
+
       (Total: {{.TotalCount}})
     </div>
 
+    {{if .Jobs}}
     <table class="queue_table">
       {{range $i, $e := .Jobs}}
       <tr><td>
@@ -66,12 +92,19 @@
       </td></tr>
       {{end}}
     </table>
+    {{else}}
+    <p style="margin: 20px; color: #666;">No jobs match the current filter.</p>
+    {{end}}
   </body>
     <script>
       function updateLimit(newLimit) {
         const url = new URL(window.location.href);
         url.searchParams.set('limit', newLimit);
-        url.searchParams.set('offset', '0'); // Reset to first page
+        url.searchParams.set('offset', '0');
+        // Preserve status filter
+        if (!url.searchParams.has('status')) {
+          url.searchParams.set('status', 'submitted,running');
+        }
         window.location.href = url.toString();
       }
 

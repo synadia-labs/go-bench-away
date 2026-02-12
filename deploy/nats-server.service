@@ -1,0 +1,17 @@
+[Unit]
+Description=NATS Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nats-server -c /etc/nats/nats-server.conf
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+User=nats
+Group=nats
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

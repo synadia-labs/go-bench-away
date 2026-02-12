@@ -2,7 +2,9 @@ package client
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/synadia-labs/go-bench-away/v1/core"
 
@@ -15,21 +17,16 @@ func (c *Client) QueueName() string {
 
 func (c *Client) SubmitJob(params core.JobParameters) (*core.JobRecord, error) {
 
-	// Create a job object from parameters
 	job := core.NewJob(params)
 
-	// Create a record in jobs repository
 	jobRecordKey := fmt.Sprintf(kJobRecordKeyTmpl, job.Id)
 	_, err := c.jobsRepository.Create(jobRecordKey, job.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create job record: %v", err)
 	}
 
-	// Submit job in the queue
 	submitMsg := nats.NewMsg(c.options.jobsSubmitSubject)
-	// Message is empty, header points to job record in repository
 	submitMsg.Header.Add(kJobIdHeader, job.Id)
-	// For deduplication
 	submitMsg.Header.Add(nats.MsgIdHdr, job.Id)
 
 	_, pubErr := c.js.PublishMsg(submitMsg)
@@ -67,7 +64,6 @@ func (c *Client) LoadRecentJobs(limit, offset int) ([]*core.JobRecord, error) {
 func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error) {
 	jobs := []*core.JobRecord{}
 
-	// Get stream info to know bounds
 	sInfo, err := c.js.StreamInfo(c.options.jobsQueueStreamName)
 	if err == nats.ErrMsgNotFound {
 		return []*core.JobRecord{}, nil
@@ -79,49 +75,26 @@ func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error
 		return []*core.JobRecord{}, nil
 	}
 
-	var startSeq uint64
-	var endSeq uint64
+	firstSeq := sInfo.State.FirstSeq
+	lastSeq := sInfo.State.LastSeq
+
+	var startSeq, endSeq uint64
 	var step int
 
 	if asc {
-		// Ascending (FIFO): Start from FirstSeq + offset
-		startSeq = sInfo.State.FirstSeq + uint64(offset)
-		endSeq = sInfo.State.LastSeq
+		startSeq = firstSeq
+		endSeq = lastSeq
 		step = 1
-		if startSeq > endSeq {
-			return []*core.JobRecord{}, nil
-		}
 	} else {
-		// Descending (LIFO/Recent): Start from LastSeq - offset
-		startSeq = sInfo.State.LastSeq
-		if uint64(offset) < sInfo.State.Msgs {
-			// Careful with gap logic.
-			// If we assume no gaps, Seq count = Msgs count.
-			// But if gaps, LastSeq - FirstSeq + 1 != Msgs.
-			// The original code used Sequence subtraction:
-			// startSeq = lastSubmitMsg.Sequence - offset.
-			// This works if gaps are ignored or fatal.
-			if uint64(offset) > startSeq {
-				return []*core.JobRecord{}, nil
-			}
-			startSeq = startSeq - uint64(offset)
-		} else {
-			// Offset >= Total Msgs (approx).
-			// Let's rely on simple sequence math as before.
-			if uint64(offset) > startSeq {
-				return []*core.JobRecord{}, nil
-			}
-			startSeq = startSeq - uint64(offset)
-		}
-		endSeq = sInfo.State.FirstSeq
-		if endSeq == 0 {
-			endSeq = 1
-		} // Sequences start at 1 usually
+		startSeq = lastSeq
+		endSeq = firstSeq
 		step = -1
 	}
 
+	skipped := 0   // actual messages skipped for offset
+	collected := 0 // actual messages collected for limit
+
 	for i := startSeq; ; i += uint64(step) {
-		// Boundary checks
 		if asc {
 			if i > endSeq {
 				break
@@ -129,28 +102,11 @@ func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error
 		} else {
 			if i < endSeq || i == 0 {
 				break
-			} // i starts high, goes down. Stop if < FirstSeq.
-		}
-
-		// Limit check
-		// Count how many we've processed?
-		// Actually limit applies to *results found*.
-		if limit > 0 && len(jobs) >= limit {
-			break
+			}
 		}
 
 		rawMsg, err := c.js.GetMsg(c.options.jobsQueueStreamName, i)
 		if err != nil {
-			// If message is missing (gap), just continue?
-			// Original code ERROR'd on missing msg.
-			// But usually safely skipping gaps is better for robustness.
-			// Let's try to match original robustness but maybe slightly safer?
-			// "Failed retrieve submit request"
-			// If I want to be safe for "ascending", I should probably skip gaps.
-			// But let's error to be consistent with original behavior if preferred.
-			// Actually, for Ascending, if I start at 1 and it was purged, I fail.
-			// So skipping is better.
-			// Let's Skip if err (assuming not found/purged).
 			continue
 		}
 
@@ -160,12 +116,9 @@ func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error
 		}
 
 		jobRecordKey := fmt.Sprintf(kJobRecordKeyTmpl, jobId)
-
 		kve, err := c.jobsRepository.Get(jobRecordKey)
 		if err != nil {
-			// Skip if repository record missing
 			continue
-			// Original: returned error "Failed to job %s record"
 		}
 
 		job, err := core.LoadJob(kve.Value())
@@ -173,7 +126,17 @@ func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error
 			continue
 		}
 
+		if skipped < offset {
+			skipped++
+			continue
+		}
+
 		jobs = append(jobs, job)
+		collected++
+
+		if limit > 0 && collected >= limit {
+			break
+		}
 	}
 
 	return jobs, nil
@@ -182,15 +145,14 @@ func (c *Client) LoadJobs(limit, offset int, asc bool) ([]*core.JobRecord, error
 func (c *Client) GetQueueStatus() (*core.QueueStatus, error) {
 	qs := &core.QueueStatus{}
 
-	lastSubmitMsg, err := c.js.GetLastMsg(c.options.jobsQueueStreamName, c.options.jobsSubmitSubject)
+	sInfo, err := c.js.StreamInfo(c.options.jobsQueueStreamName)
 	if err == nats.ErrMsgNotFound {
 		return qs, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	lastSeq := lastSubmitMsg.Sequence
-	qs.SubmittedCount = lastSeq
+	qs.SubmittedCount = sInfo.State.Msgs
 
 	return qs, nil
 }
@@ -200,7 +162,6 @@ func (c *Client) FindJobOffset(query string) (int, error) {
 		return -1, nil
 	}
 
-	// For FIFO/Ascending, we need distance from FirstSeq.
 	sInfo, err := c.js.StreamInfo(c.options.jobsQueueStreamName)
 	if err != nil {
 		return -1, nil
@@ -209,15 +170,36 @@ func (c *Client) FindJobOffset(query string) (int, error) {
 		return -1, nil
 	}
 
-	lastSeq := sInfo.State.LastSeq
 	firstSeq := sInfo.State.FirstSeq
+	lastSeq := sInfo.State.LastSeq
 
-	// Scan backwards (start from newest, usually what people want)
-	// But calculate offset from start.
-	for i := lastSeq; i >= firstSeq; i-- {
+	seqToOffset := make(map[uint64]int)
+	msgIndex := 0
+	for i := firstSeq; i <= lastSeq; i++ {
 		rawMsg, err := c.js.GetMsg(c.options.jobsQueueStreamName, i)
 		if err != nil {
-			// Skip missing messages
+			continue
+		}
+		jobId := rawMsg.Header.Get(kJobIdHeader)
+		if jobId == "" {
+			continue
+		}
+		jobRecordKey := fmt.Sprintf(kJobRecordKeyTmpl, jobId)
+		if _, err := c.jobsRepository.Get(jobRecordKey); err != nil {
+			continue
+		}
+		seqToOffset[i] = msgIndex
+		msgIndex++
+	}
+
+	for i := lastSeq; i >= firstSeq; i-- {
+		offset, exists := seqToOffset[i]
+		if !exists {
+			continue
+		}
+
+		rawMsg, err := c.js.GetMsg(c.options.jobsQueueStreamName, i)
+		if err != nil {
 			continue
 		}
 
@@ -237,27 +219,281 @@ func (c *Client) FindJobOffset(query string) (int, error) {
 			continue
 		}
 
-		// Search Query Check
 		if containsIgnoreCase(job.Id, query) ||
 			containsIgnoreCase(job.Parameters.GitRef, query) ||
 			containsIgnoreCase(job.Parameters.GitRemote, query) ||
 			containsIgnoreCase(job.Parameters.TestsFilterExpr, query) {
-
-			// Found it.
-			// Offset for FIFO (Ascending) = i - firstSeq.
-			// This assumes we are paging by sequence count from start.
-			// Re-verify logic:
-			// LoadJobs(asc=true) -> startSeq = sInfo.State.FirstSeq + uint64(offset)
-			// So if we found item at `i`, then `i = FirstSeq + offset` => `offset = i - FirstSeq`.
-			return int(i - firstSeq), nil
+			return offset, nil
 		}
 
 		if i == 0 {
 			break
-		} // Safety breakdown
+		}
 	}
 
 	return -1, nil
+}
+
+func (c *Client) LoadJobsFiltered(limit, offset int, asc bool, statuses []core.JobStatus) ([]*core.JobRecord, int, error) {
+	var jobs []*core.JobRecord
+
+	sInfo, err := c.js.StreamInfo(c.options.jobsQueueStreamName)
+	if err == nats.ErrMsgNotFound {
+		return jobs, 0, nil
+	} else if err != nil {
+		return nil, 0, err
+	}
+
+	if sInfo.State.Msgs == 0 {
+		return jobs, 0, nil
+	}
+
+	statusSet := make(map[core.JobStatus]bool, len(statuses))
+	for _, s := range statuses {
+		statusSet[s] = true
+	}
+
+	firstSeq := sInfo.State.FirstSeq
+	lastSeq := sInfo.State.LastSeq
+
+	var startSeq, endSeq uint64
+	var step int
+	if asc {
+		startSeq = firstSeq
+		endSeq = lastSeq
+		step = 1
+	} else {
+		startSeq = lastSeq
+		endSeq = firstSeq
+		step = -1
+	}
+
+	skipped := 0   // filtered messages skipped for offset
+	collected := 0 // filtered messages collected for limit
+	scanned := 0   // total messages scanned (for scan depth limit)
+	fetchLimit := limit + 1
+	if limit <= 0 {
+		fetchLimit = 0 // no limit
+	}
+
+	maxScan := 0
+	if len(statusSet) > 0 {
+		allTransient := true
+		for s := range statusSet {
+			if s != core.Submitted && s != core.Running {
+				allTransient = false
+				break
+			}
+		}
+		if allTransient {
+			maxScan = 50
+		}
+	}
+
+	for i := startSeq; ; i += uint64(step) {
+		if asc {
+			if i > endSeq {
+				break
+			}
+		} else {
+			if i < endSeq || i == 0 {
+				break
+			}
+		}
+
+		if maxScan > 0 && scanned >= maxScan {
+			break
+		}
+
+		rawMsg, err := c.js.GetMsg(c.options.jobsQueueStreamName, i)
+		if err != nil {
+			scanned++
+			continue
+		}
+		scanned++
+
+		jobId := rawMsg.Header.Get(kJobIdHeader)
+		if jobId == "" {
+			continue
+		}
+
+		jobRecordKey := fmt.Sprintf(kJobRecordKeyTmpl, jobId)
+		kve, err := c.jobsRepository.Get(jobRecordKey)
+		if err != nil {
+			continue
+		}
+
+		job, err := core.LoadJob(kve.Value())
+		if err != nil {
+			continue
+		}
+
+		if len(statusSet) > 0 && !statusSet[job.Status] {
+			continue
+		}
+
+		if skipped < offset {
+			skipped++
+			continue
+		}
+
+		jobs = append(jobs, job)
+		collected++
+
+		if fetchLimit > 0 && collected >= fetchLimit {
+			break
+		}
+	}
+
+	hasMore := limit > 0 && len(jobs) > limit
+	if hasMore {
+		jobs = jobs[:limit]
+	}
+
+	totalFiltered := offset + len(jobs)
+	if hasMore {
+		totalFiltered++
+	}
+
+	return jobs, totalFiltered, nil
+}
+
+func (c *Client) CountJobsByStatus() (map[core.JobStatus]int, error) {
+	watcher, err := c.jobsRepository.WatchAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to watch KV: %v", err)
+	}
+	defer func() { _ = watcher.Stop() }()
+
+	counts := make(map[core.JobStatus]int)
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			break
+		}
+		if entry.Operation() != nats.KeyValuePut {
+			continue
+		}
+		job, err := core.LoadJob(entry.Value())
+		if err != nil {
+			continue
+		}
+		counts[job.Status]++
+	}
+	return counts, nil
+}
+
+func (c *Client) LoadJobsByKV(limit, offset int, statuses []core.JobStatus) ([]*core.JobRecord, map[core.JobStatus]int, error) {
+	watcher, err := c.jobsRepository.WatchAll()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to watch KV: %v", err)
+	}
+	defer func() { _ = watcher.Stop() }()
+
+	statusSet := make(map[core.JobStatus]bool, len(statuses))
+	for _, s := range statuses {
+		statusSet[s] = true
+	}
+
+	counts := make(map[core.JobStatus]int)
+	var matched []*core.JobRecord
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			break
+		}
+		if entry.Operation() != nats.KeyValuePut {
+			continue
+		}
+		job, err := core.LoadJob(entry.Value())
+		if err != nil {
+			continue
+		}
+		counts[job.Status]++
+		if len(statusSet) == 0 || statusSet[job.Status] {
+			matched = append(matched, job)
+		}
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].Created.After(matched[j].Created)
+	})
+
+	if offset >= len(matched) {
+		return nil, counts, nil
+	}
+	matched = matched[offset:]
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+
+	return matched, counts, nil
+}
+
+func (c *Client) FailStaleJobs() (int, error) {
+	watcher, err := c.jobsRepository.WatchAll()
+	if err != nil {
+		return 0, fmt.Errorf("failed to watch KV: %v", err)
+	}
+	defer func() { _ = watcher.Stop() }()
+
+	type staleJob struct {
+		id      string
+		runtime time.Duration
+		timeout time.Duration
+	}
+
+	var staleJobs []staleJob
+	var skippedActive int
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			break
+		}
+		if entry.Operation() != nats.KeyValuePut {
+			continue
+		}
+		job, err := core.LoadJob(entry.Value())
+		if err != nil {
+			continue
+		}
+		if job.Status != core.Running {
+			continue
+		}
+		runtime := time.Since(job.Started)
+		if runtime > job.Parameters.Timeout {
+			staleJobs = append(staleJobs, staleJob{
+				id:      job.Id,
+				runtime: runtime,
+				timeout: job.Parameters.Timeout,
+			})
+		} else {
+			skippedActive++
+		}
+	}
+
+	fmt.Printf("Found %d running jobs exceeding timeout, %d still within timeout\n",
+		len(staleJobs), skippedActive)
+
+	updated := 0
+	for _, sj := range staleJobs {
+		job, revision, err := c.LoadJob(sj.id)
+		if err != nil {
+			fmt.Printf("  Skip %s: %v\n", sj.id, err)
+			continue
+		}
+		if job.Status != core.Running {
+			continue
+		}
+		fmt.Printf("  Failing %s (ran %s, timeout %s)\n",
+			sj.id, sj.runtime.Truncate(time.Minute), sj.timeout)
+		job.SetFinalStatus(core.Failed)
+		_, err = c.UpdateJob(job, revision)
+		if err != nil {
+			fmt.Printf("  Failed to update %s: %v\n", sj.id, err)
+			continue
+		}
+		updated++
+	}
+	return updated, nil
 }
 
 func containsIgnoreCase(s, substr string) bool {

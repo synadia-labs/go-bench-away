@@ -1,0 +1,20 @@
+[Unit]
+Description=go-bench-away
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gba \
+  -server nats://0283509234734458@18.216.145.145 \
+  worker \
+  -gitRemoteFilterExpr .*://github\.com/(nats-io|ConnectEverything|synadia-labs|mprimi|derekcollison|ReubenMathew|levb|kozlovic|neilalexander)/.*
+Restart=on-failure
+RestartSec=10
+User=gauge-gba
+Group=gauge-gba
+Environment=PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/gauge-gba
+
+[Install]
+WantedBy=multi-user.target
