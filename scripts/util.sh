@@ -9,9 +9,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_err() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_info() { printf "%b[INFO]%b %s\n" "${GREEN}" "${NC}" "$1"; }
+log_warn() { printf "%b[WARN]%b %s\n" "${YELLOW}" "${NC}" "$1"; }
+log_err() { printf "%b[ERROR]%b %s\n" "${RED}" "${NC}" "$1"; }
 
 check_binary() {
     local binary="$1"
@@ -26,9 +26,15 @@ check_binary() {
 
 install_git() {
     log_info "Git is missing."
+    
+    if [ ! -t 0 ]; then
+        log_warn "Non-interactive terminal detected. Skipping automatic git installation."
+        return 1
+    fi
+
     read -p "Do you want to attempt automatic installation? [y/N] " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
         return 1
     fi
 
@@ -51,9 +57,15 @@ install_git() {
 
 install_go() {
     log_info "Go is missing."
+    
+    if [ ! -t 0 ]; then
+        log_warn "Non-interactive terminal detected. Skipping automatic Go installation."
+        return 1
+    fi
+
     read -p "Do you want to attempt automatic installation (Go 1.25.1)? [y/N] " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
         return 1
     fi
 
@@ -71,7 +83,7 @@ install_go() {
                 log_info "Go installed to /usr/local/go"
                 # Suggest path update
                 log_warn "Please add /usr/local/go/bin to your PATH."
-                export PATH=$PATH:/usr/local/go/bin
+                export PATH="$PATH:/usr/local/go/bin"
             else
                 log_err "Failed to extract Go."
                 return 1
@@ -133,7 +145,7 @@ check_prereqs() {
         log_warn "'nc' not found, skipping network connectivity check."
     fi
 
-    if [ $failed -eq 1 ]; then
+    if [ "$failed" -eq 1 ]; then
         log_err "Prerequisite checks failed. Please install missing dependencies."
         exit 1
     fi
@@ -152,11 +164,42 @@ perform_backup() {
 
     # 2. Capture Binary Paths
     {
-        echo "GO_BIN=$(command -v go)"
-        echo "GIT_BIN=$(command -v git)"
+        printf "GO_BIN=%s\n" "$(command -v go)"
+        printf "GIT_BIN=%s\n" "$(command -v git)"
     } > "$backup_dir/binaries.txt"
 
-    # 3. Best-effort JetStream Data Backup
+    # 3. NATS JetStream Backup (CLI-based)
+    if command -v nats &> /dev/null; then
+        log_info "Detected 'nats' CLI. Attempting hot backup of JetStream streams..."
+        local js_backup_dir="$backup_dir/jetstream"
+        mkdir -p "$js_backup_dir"
+        
+        # Get list of all streams (including KV/Obj backing streams)
+        # We try to use the configured context or fall back to default connection
+        local streams
+        if streams=$(nats stream ls -a -n 2>/dev/null); then
+            if [ -z "$streams" ]; then
+                log_warn "No streams found to backup."
+            else
+                echo "$streams" | while read -r stream; do
+                    if [ -n "$stream" ]; then
+                        log_info "Backing up stream: $stream"
+                        if nats stream backup "$stream" "$js_backup_dir/$stream" &> /dev/null; then
+                            log_info "  Success."
+                        else
+                            log_err "  Failed to backup stream '$stream'."
+                        fi
+                    fi
+                done
+            fi
+        else
+             log_warn "Failed to list streams. Check NATS connectivity/credentials."
+        fi
+    else
+        log_info "'nats' CLI not found. Skipping hot backup."
+    fi
+
+    # 4. Best-effort JetStream Data Backup (Filesystem-based)
     # Attempt to find running nats-server and its config
     if pgrep nats-server > /dev/null; then
         log_info "Detected running nats-server."
@@ -179,9 +222,9 @@ perform_backup() {
         # Look for -c or --config or -sd or --store_dir
         # This is a simple grep, not a full arg parser
         local config_file=""
-        if [[ $cmdline =~ -c\ ([^[:space:]]+) ]]; then
+        if [[ "$cmdline" =~ -c[[:space:]]+([^[:space:]]+) ]]; then
             config_file="${BASH_REMATCH[1]}"
-        elif [[ $cmdline =~ --config\ ([^[:space:]]+) ]]; then
+        elif [[ "$cmdline" =~ --config[[:space:]]+([^[:space:]]+) ]]; then
             config_file="${BASH_REMATCH[1]}"
         fi
 
@@ -208,8 +251,10 @@ perform_backup() {
 
     # Create tarball
     local tarball="${backup_dir}.tar.gz"
-    tar -czf "$tarball" -C "$(dirname "$backup_dir")" "$(basename "$backup_dir")"
-    rm -rf "$backup_dir"
+    if [ -d "$backup_dir" ]; then
+        tar -czf "$tarball" -C "$(dirname "$backup_dir")" "$(basename "$backup_dir")"
+        rm -rf "$backup_dir"
+    fi
     
     log_info "Backup complete: $tarball"
     log_info "Transfer this archive to your new host."
@@ -227,16 +272,14 @@ case "$cmd" in
         perform_backup
         ;;
     help|--help|-h)
-        echo "Usage: ./scripts/util.sh [command]"
-        echo ""
-        echo "Commands:"
-        echo "  check   - Verify system prerequisites (Go, Git, NATS connectivity)"
-        echo "  backup  - Verify prerequisites and create a migration backup archive (env vars, config)"
-        echo "  help    - Show this help message"
-        echo ""
-        echo "Description:"
-        echo "  This utility script assists with setting up and migrating go-bench-away environments."
-        echo "  Use 'check' to validate a new host, and 'backup' to prepare for migration from an existing host."
+        printf "Usage: %s [command]\n\n" "$0"
+        printf "Commands:\n"
+        printf "  check   - Verify system prerequisites (Go, Git, NATS connectivity)\n"
+        printf "  backup  - Verify prerequisites and create a migration backup archive (env vars, config)\n"
+        printf "  help    - Show this help message\n\n"
+        printf "Description:\n"
+        printf "  This utility script assists with setting up and migrating go-bench-away environments.\n"
+        printf "  Use 'check' to validate a new host, and 'backup' to prepare for migration from an existing host.\n"
         ;;
     *)
         log_err "Unknown command: $cmd"

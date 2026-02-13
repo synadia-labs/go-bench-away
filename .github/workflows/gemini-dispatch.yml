@@ -166,7 +166,6 @@ jobs:
       issues: 'write'
       pull-requests: 'write'
     with:
-      prompt: '/gemini-algorithm'
       additional_context: '${{ needs.dispatch.outputs.additional_context }}'
     secrets: 'inherit'
 

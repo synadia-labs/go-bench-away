@@ -33,7 +33,12 @@ When generating tests, aim for:
 2. **Identify Gaps**: Determine which functions lack coverage or inhabit complex logic.
 3. **Plan Tests**: List the success paths, edge cases, and error scenarios.
 4. **Generate**: Provide the complete Go code for the unit tests. 
-5. **Explain**: Briefly explain the rationale behind your test choices and any mocks used.
+5. **Generate File**:
+    - **Check**: Does the test file exist? (e.g., if testing `foo.go`, check for `foo_test.go`).
+    - **Create/Update**: Use the `create_or_update_file` tool to write the test code directly to the file.
+        - If the file exists, append the new tests or merge intelligently.
+        - If it's a new file, ensure the correct package declaration and imports are included.
+6. **Explain**: Briefly explain the rationale behind your test choices and any mocks used.
 
-Use the `add_comment_to_pending_review` or equivalent tool if running in a PR context, or simply output the code if invoked directly.
+Use the `create_or_update_file` tool to directly apply the tests. If you are unsure or unable to write the file, fallback to commenting with the code block.
 """

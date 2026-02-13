@@ -21,11 +21,13 @@ report.html
 
 # LLM / AI
 .gemini/
+.beads/
 .claude/
 .cursor/
 .llm/
 .windsurf/
 .aider/
+
 task.md
 implementation_plan.md
 walkthrough.md
@@ -35,3 +37,4 @@ gha-creds-*.json
 
 # Local / Temporary Symlinks
 jjj
+benchmarks/
