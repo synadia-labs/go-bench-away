@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
@@ -100,8 +101,8 @@ func NewClient(serverUrl, credentials, namespace string, opts ...Option) (*Clien
 
 	client.logDebug("Connected")
 
-	// Init JetStream
-	js, err := client.nc.JetStream()
+	// Init JetStream with extended timeout to tolerate slow object store consumer creation
+	js, err := client.nc.JetStream(nats.MaxWait(30 * time.Minute))
 	if err != nil {
 		return nil, err
 	}

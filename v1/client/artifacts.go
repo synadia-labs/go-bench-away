@@ -1,9 +1,11 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/synadia-labs/go-bench-away/v1/core"
 
@@ -60,7 +62,9 @@ func (c *Client) readArtifact(key string, w io.Writer) error {
 	if key == "" {
 		return fmt.Errorf("missing artifact")
 	}
-	o, err := c.artifactsStore.Get(key)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	o, err := c.artifactsStore.Get(key, nats.Context(ctx))
 	if err != nil {
 		return fmt.Errorf("artifact get: %w", err)
 	}
