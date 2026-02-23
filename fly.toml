@@ -1,0 +1,14 @@
+app = "nats-gauge-v1-queue"
+primary_region = "lax"
+
+[http_service]
+  internal_port = 8888
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[files]]
+  guest_path = "/tmp/nats.creds"
+  secret_name = "NATS_CREDS"
