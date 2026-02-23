@@ -45,6 +45,8 @@ GO="{{.GoPath}}"
 export GOEXPERIMENT="{{.GoExperiment}}"
 # Command to execute on exit (useful to delete any files that tests may leave behind)
 CLEANUP="{{.CleanupCommand}}"
+# Don't include tracebacks, they are super expensive in the object store.
+GOTRACEBACK=none
 
 # Set an exit trap to do any cleanup
 trap "$CLEANUP" EXIT
