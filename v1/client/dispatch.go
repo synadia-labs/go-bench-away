@@ -16,6 +16,7 @@ func (c *Client) DispatchJobs(ctx context.Context, handleJob func(*core.JobRecor
 	consumerName := fmt.Sprintf(kJobsConsumerNameTmpl, c.options.namespace)
 	var subOpts = []nats.SubOpt{
 		nats.BindStream(c.options.jobsQueueStreamName),
+		nats.MaxAckPending(500),
 	}
 	sub, err := c.js.PullSubscribe(
 		"",
