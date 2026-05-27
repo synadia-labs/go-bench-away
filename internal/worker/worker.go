@@ -81,6 +81,12 @@ func NewWorker(c WorkerClient, jobsDir string, allowedGitRemoteExpr []string) (W
 }
 
 func (w *workerImpl) Run(ctx context.Context) error {
+	orphanedJobs, err := w.c.CancelOrphanedJobs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to cancel orphaned jobs at startup: %v\n", err)
+	} else if orphanedJobs > 0 {
+		fmt.Printf("⚙️  Cancelled %d orphaned jobs\n", orphanedJobs)
+	}
 
 	handleJob := func(jr *core.JobRecord, revision uint64) (bool, error) {
 		return w.processJob(jr, revision)

@@ -15,6 +15,8 @@ type mockClient struct {
 	StubUploadLogArtifact     func(string, string) (string, error)
 	StubUploadResultsArtifact func(string, string) (string, error)
 	StubUploadScriptArtifact  func(string, string) (string, error)
+	StubDispatchJobs          func(context.Context, func(*core.JobRecord, uint64) (bool, error)) error
+	StubCancelOrphanedJobs    func() (int, error)
 }
 
 func (c *mockClient) UpdateJob(job *core.JobRecord, rev uint64) (uint64, error) {
@@ -31,7 +33,11 @@ func (c *mockClient) UploadScriptArtifact(jobId string, path string) (string, er
 }
 
 func (c *mockClient) DispatchJobs(ctx context.Context, handleJob func(*core.JobRecord, uint64) (bool, error)) error {
-	return nil
+	return c.StubDispatchJobs(ctx, handleJob)
+}
+
+func (c *mockClient) CancelOrphanedJobs() (int, error) {
+	return c.StubCancelOrphanedJobs()
 }
 
 func newMockClient() WorkerClient {
@@ -40,6 +46,8 @@ func newMockClient() WorkerClient {
 		StubUploadLogArtifact:     func(string, string) (string, error) { return "", nil },
 		StubUploadResultsArtifact: func(string, string) (string, error) { return "", nil },
 		StubUploadScriptArtifact:  func(string, string) (string, error) { return "", nil },
+		StubDispatchJobs:          func(context.Context, func(*core.JobRecord, uint64) (bool, error)) error { return nil },
+		StubCancelOrphanedJobs:    func() (int, error) { return 0, nil },
 	}
 }
 
@@ -166,5 +174,45 @@ func TestFilterDisallowedJobs(t *testing.T) {
 				}
 			},
 		)
+	}
+}
+
+func TestRunCancelsOrphanedJobsBeforeDispatch(t *testing.T) {
+	var cancelCalled bool
+	var dispatchCalled bool
+
+	client := &mockClient{
+		StubUpdateJob:             func(*core.JobRecord, uint64) (uint64, error) { return 0, nil },
+		StubUploadLogArtifact:     func(string, string) (string, error) { return "", nil },
+		StubUploadResultsArtifact: func(string, string) (string, error) { return "", nil },
+		StubUploadScriptArtifact:  func(string, string) (string, error) { return "", nil },
+		StubCancelOrphanedJobs: func() (int, error) {
+			cancelCalled = true
+			return 1, nil
+		},
+		StubDispatchJobs: func(_ context.Context, _ func(*core.JobRecord, uint64) (bool, error)) error {
+			dispatchCalled = true
+			if !cancelCalled {
+				t.Fatal("dispatch started before orphaned jobs were cancelled")
+			}
+			return nil
+		},
+	}
+
+	w, err := NewWorker(client, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("Client init failed: %v", err)
+	}
+
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if !cancelCalled {
+		t.Fatal("expected orphaned-job cancellation to run at startup")
+	}
+
+	if !dispatchCalled {
+		t.Fatal("expected dispatch to run after startup recovery")
 	}
 }

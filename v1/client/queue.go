@@ -496,6 +496,56 @@ func (c *Client) FailStaleJobs() (int, error) {
 	return updated, nil
 }
 
+func (c *Client) CancelOrphanedJobs() (int, error) {
+	watcher, err := c.jobsRepository.WatchAll()
+	if err != nil {
+		return 0, fmt.Errorf("failed to watch KV: %v", err)
+	}
+	defer func() { _ = watcher.Stop() }()
+
+	var orphanedJobIDs []string
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			break
+		}
+		if entry.Operation() != nats.KeyValuePut {
+			continue
+		}
+		job, err := core.LoadJob(entry.Value())
+		if err != nil {
+			continue
+		}
+		if job.Status != core.Running {
+			continue
+		}
+		orphanedJobIDs = append(orphanedJobIDs, job.Id)
+	}
+
+	fmt.Printf("Found %d orphaned running jobs at startup\n", len(orphanedJobIDs))
+
+	updated := 0
+	for _, jobID := range orphanedJobIDs {
+		job, revision, err := c.LoadJob(jobID)
+		if err != nil {
+			fmt.Printf("  Skip %s: %v\n", jobID, err)
+			continue
+		}
+		if job.Status != core.Running {
+			continue
+		}
+		fmt.Printf("  Cancelling %s\n", jobID)
+		job.SetFinalStatus(core.Cancelled)
+		_, err = c.UpdateJob(job, revision)
+		if err != nil {
+			fmt.Printf("  Failed to update %s: %v\n", jobID, err)
+			continue
+		}
+		updated++
+	}
+
+	return updated, nil
+}
+
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

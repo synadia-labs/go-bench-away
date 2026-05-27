@@ -22,4 +22,5 @@ type JobUpdaterClient interface {
 type WorkerClient interface {
 	DispatcherClient
 	JobUpdaterClient
+	CancelOrphanedJobs() (int, error)
 }

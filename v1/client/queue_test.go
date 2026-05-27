@@ -162,3 +162,103 @@ func TestSubmit(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelOrphanedJobs(t *testing.T) {
+
+	// Configure local server and start it
+	opts := server.DefaultTestOptions
+	opts.Port = -1
+	opts.JetStream = true
+	opts.StoreDir = t.TempDir()
+
+	s := server.RunServer(&opts)
+	defer s.Shutdown()
+
+	namespace := "test"
+	credentials := ""
+
+	bareClient, err := NewClient(
+		s.ClientURL(),
+		credentials,
+		namespace,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer bareClient.Close()
+
+	if err := bareClient.CreateJobsQueue(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bareClient.CreateJobsRepository(); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := NewClient(
+		s.ClientURL(),
+		credentials,
+		namespace,
+		InitJobsQueue(),
+		InitJobsRepository(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	jobParams := core.JobParameters{
+		GitRemote:       "https://github.com/synadia-labs/go-bench-away.git",
+		GitRef:          "main",
+		TestsSubDir:     "v1/core",
+		TestsFilterExpr: ".*",
+		Reps:            3,
+		TestMinRuntime:  1 * time.Second,
+		Timeout:         5 * time.Minute,
+		SkipCleanup:     true,
+		Username:        "test",
+	}
+
+	runningJob, err := client.SubmitJob(jobParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedRunningJob, revision, err := client.LoadJob(runningJob.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedRunningJob.SetRunningStatus()
+	if _, err := client.UpdateJob(storedRunningJob, revision); err != nil {
+		t.Fatal(err)
+	}
+
+	submittedJob, err := client.SubmitJob(jobParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := client.CancelOrphanedJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != 1 {
+		t.Fatalf("expected 1 orphaned job to be cancelled, got %d", updated)
+	}
+
+	runningRecord, _, err := client.LoadJob(runningJob.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runningRecord.Status != core.Cancelled {
+		t.Fatalf("expected running job to be cancelled, got %s", runningRecord.Status)
+	}
+
+	submittedRecord, _, err := client.LoadJob(submittedJob.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submittedRecord.Status != core.Submitted {
+		t.Fatalf("expected submitted job to remain submitted, got %s", submittedRecord.Status)
+	}
+}
