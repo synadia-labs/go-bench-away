@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"text/template"
+	"time"
 
 	"github.com/synadia-labs/go-bench-away/v1/core"
 	"golang.org/x/sys/unix"
@@ -227,7 +229,17 @@ func (w *workerImpl) runJob(job *core.JobRecord) (string, error) {
 	// Tee output to logfile and worker stdout
 	mw := io.MultiWriter(logFile, os.Stdout)
 
-	cmd := exec.CommandContext(context.Background(), scriptPath)
+	ctx, cancel := context.WithTimeout(context.Background(), job.Parameters.Timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, scriptPath)
+	// Run the script in its own process group so a timeout also terminates any
+	// descendants (notably go test and benchmark subprocesses).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return unix.Kill(-cmd.Process.Pid, unix.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 
 	cmd.Stdout = mw
 	cmd.Stderr = mw
@@ -237,10 +249,14 @@ func (w *workerImpl) runJob(job *core.JobRecord) (string, error) {
 		return jobTempDir, fmt.Errorf("Failed to launch job %s: %w", job.Id, err)
 	}
 
-	procState, waitErr := cmd.Process.Wait()
+	waitErr := cmd.Wait()
+	if ctx.Err() == context.DeadlineExceeded {
+		return jobTempDir, fmt.Errorf("Job %s timed out after %s", job.Id, job.Parameters.Timeout)
+	}
 	if waitErr != nil {
 		return jobTempDir, fmt.Errorf("Error waiting for termination of job %s: %s", job.Id, waitErr)
 	}
+	procState := cmd.ProcessState
 
 	shaBytes, err := os.ReadFile(shaPath)
 	if err == nil {
