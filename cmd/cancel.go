@@ -18,7 +18,7 @@ func cancelCommand() subcommands.Command {
 	return &cancelCmd{
 		baseCommand: baseCommand{
 			name:     "cancel",
-			synopsis: "Cancel a queued job",
+			synopsis: "Cancel a queued or running job",
 			usage:    "cancel [options] jobId [jobId [...]]\n",
 		},
 	}

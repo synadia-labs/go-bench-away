@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -44,8 +45,16 @@ func (c *Client) CancelJob(jobId string) error {
 		return err
 	}
 
-	if jobRecord.Status != core.Submitted {
+	if jobRecord.Status != core.Submitted && jobRecord.Status != core.Running {
 		return fmt.Errorf("cannot cancel job in state %s", jobRecord.Status.String())
+	}
+
+	if jobRecord.Status == core.Running {
+		subject := fmt.Sprintf("%s.%s", c.options.jobsCancelSubject, jobId)
+		if _, err := c.nc.Request(subject, nil, 5*time.Second); err != nil {
+			return fmt.Errorf("failed to cancel running job %s: %w", jobId, err)
+		}
+		return nil
 	}
 
 	jobRecord.SetFinalStatus(core.Cancelled)
@@ -54,6 +63,35 @@ func (c *Client) CancelJob(jobId string) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+// SubscribeJobCancellations invokes cancelJob when a cancellation request is
+// received for this client's queue. The subscription is removed when ctx ends.
+func (c *Client) SubscribeJobCancellations(ctx context.Context, cancelJob func(string) bool) error {
+	subject := c.options.jobsCancelSubject + ".*"
+	sub, err := c.nc.Subscribe(subject, func(msg *nats.Msg) {
+		separator := strings.LastIndexByte(msg.Subject, '.')
+		if separator >= 0 && cancelJob(msg.Subject[separator+1:]) {
+			if err := msg.Respond(nil); err != nil {
+				c.logWarn("Failed to acknowledge job cancellation: %v", err)
+			}
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to job cancellations: %w", err)
+	}
+	if err := c.nc.Flush(); err != nil {
+		_ = sub.Unsubscribe()
+		return fmt.Errorf("failed to activate job cancellation subscription: %w", err)
+	}
+
+	go func() {
+		<-ctx.Done()
+		if err := sub.Unsubscribe(); err != nil {
+			c.logWarn("Failed to unsubscribe from job cancellations: %v", err)
+		}
+	}()
 	return nil
 }
 

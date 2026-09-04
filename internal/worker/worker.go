@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"text/template"
 	"time"
@@ -40,6 +42,8 @@ type workerImpl struct {
 	scriptTemplate          *template.Template
 	testSkipRun             bool
 	allowedGitRemoteRegexes []*regexp.Regexp
+	activeJobs              map[string]context.CancelFunc
+	activeJobsMu            sync.Mutex
 }
 
 func NewWorker(c WorkerClient, jobsDir string, allowedGitRemoteExpr []string) (Worker, error) {
@@ -79,6 +83,7 @@ func NewWorker(c WorkerClient, jobsDir string, allowedGitRemoteExpr []string) (W
 		},
 		scriptTemplate:          template.Must(template.New("benchmark_script").Parse(runScriptTmpl)),
 		allowedGitRemoteRegexes: allowedGitRemoteRegexes,
+		activeJobs:              make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -90,18 +95,39 @@ func (w *workerImpl) Run(ctx context.Context) error {
 		fmt.Printf("⚙️  Cancelled %d orphaned jobs\n", orphanedJobs)
 	}
 
+	if subscriber, ok := w.c.(JobCancellationSubscriber); ok {
+		if err := subscriber.SubscribeJobCancellations(ctx, w.cancelJob); err != nil {
+			return err
+		}
+	}
+
 	handleJob := func(jr *core.JobRecord, revision uint64) (bool, error) {
-		return w.processJob(jr, revision)
+		return w.processJobContext(ctx, jr, revision)
 	}
 	fmt.Printf("⚙️  Ready for work\n")
 	return w.c.DispatchJobs(ctx, handleJob)
 }
 
 func (w *workerImpl) processJob(job *core.JobRecord, revision uint64) (bool, error) {
+	return w.processJobContext(context.Background(), job, revision)
+}
+
+func (w *workerImpl) processJobContext(parent context.Context, job *core.JobRecord, revision uint64) (bool, error) {
 
 	if job.Status != core.Submitted {
 		return false, fmt.Errorf("Cannot process job %s in status %v", job.Id, job.Status)
 	}
+
+	jobCtx, cancel := context.WithCancel(parent)
+	w.activeJobsMu.Lock()
+	w.activeJobs[job.Id] = cancel
+	w.activeJobsMu.Unlock()
+	defer func() {
+		cancel()
+		w.activeJobsMu.Lock()
+		delete(w.activeJobs, job.Id)
+		w.activeJobsMu.Unlock()
+	}()
 
 	job.SetRunningStatus()
 	job.WorkerInfo = w.workerInfo
@@ -122,10 +148,12 @@ func (w *workerImpl) processJob(job *core.JobRecord, revision uint64) (bool, err
 
 	// Run the job
 	{
-		jobTempDir, runErr := w.runJob(job)
+		jobTempDir, runErr := w.runJob(jobCtx, job)
 
 		// Update job status to final
-		if runErr != nil {
+		if errors.Is(runErr, context.Canceled) {
+			job.SetFinalStatus(core.Cancelled)
+		} else if runErr != nil {
 			job.SetFinalStatus(core.Failed)
 		} else {
 			job.SetFinalStatus(core.Succeeded)
@@ -135,7 +163,9 @@ func (w *workerImpl) processJob(job *core.JobRecord, revision uint64) (bool, err
 		uploadErr := w.uploadArtifacts(job, jobTempDir)
 		if uploadErr != nil {
 			fmt.Fprintf(os.Stderr, "Job %s artifacts upload failed: %v\n", job.Id, uploadErr)
-			job.Status = core.Failed
+			if job.Status != core.Cancelled {
+				job.Status = core.Failed
+			}
 		}
 
 		// Remove job directory
@@ -155,7 +185,18 @@ finalStatusUpdate:
 	return false, nil
 }
 
-func (w *workerImpl) runJob(job *core.JobRecord) (string, error) {
+func (w *workerImpl) cancelJob(jobId string) bool {
+	w.activeJobsMu.Lock()
+	cancel := w.activeJobs[jobId]
+	w.activeJobsMu.Unlock()
+	if cancel != nil {
+		cancel()
+		return true
+	}
+	return false
+}
+
+func (w *workerImpl) runJob(parent context.Context, job *core.JobRecord) (string, error) {
 
 	jobTempDir, err := os.MkdirTemp(w.jobsDir, fmt.Sprintf("go-bench-away-job-%s-", job.Id))
 	if err != nil {
@@ -229,7 +270,7 @@ func (w *workerImpl) runJob(job *core.JobRecord) (string, error) {
 	// Tee output to logfile and worker stdout
 	mw := io.MultiWriter(logFile, os.Stdout)
 
-	ctx, cancel := context.WithTimeout(context.Background(), job.Parameters.Timeout)
+	ctx, cancel := context.WithTimeout(parent, job.Parameters.Timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, scriptPath)
@@ -252,6 +293,9 @@ func (w *workerImpl) runJob(job *core.JobRecord) (string, error) {
 	waitErr := cmd.Wait()
 	if ctx.Err() == context.DeadlineExceeded {
 		return jobTempDir, fmt.Errorf("Job %s timed out after %s", job.Id, job.Parameters.Timeout)
+	}
+	if ctx.Err() == context.Canceled {
+		return jobTempDir, fmt.Errorf("Job %s cancelled: %w", job.Id, context.Canceled)
 	}
 	if waitErr != nil {
 		return jobTempDir, fmt.Errorf("Error waiting for termination of job %s: %s", job.Id, waitErr)

@@ -24,6 +24,7 @@ type Options struct {
 	jobsQueueName       string
 	jobsQueueStreamName string
 	jobsSubmitSubject   string
+	jobsCancelSubject   string
 	jobsRepositoryName  string
 	artifactsStoreName  string
 	initJobsRepository  bool
@@ -58,6 +59,7 @@ func NewClient(serverUrl, credentials, namespace string, opts ...Option) (*Clien
 			jobsQueueName:       namespace,
 			jobsQueueStreamName: fmt.Sprintf("%s-jobs", namespace),
 			jobsSubmitSubject:   fmt.Sprintf("%s.jobs.submit", namespace),
+			jobsCancelSubject:   fmt.Sprintf("%s.jobs.cancel", namespace),
 			jobsRepositoryName:  fmt.Sprintf("%s-jobs", namespace),
 			artifactsStoreName:  fmt.Sprintf("%s-artifacts", namespace),
 			clientName:          "go-bench-away CLI", //TODO add user@hostname
@@ -184,6 +186,7 @@ func WithAltQueue(queueName string) Option {
 		o.jobsQueueName = queueName
 		o.jobsQueueStreamName = fmt.Sprintf("%s-jobs", queueName)
 		o.jobsSubmitSubject = fmt.Sprintf("%s.jobs.submit", queueName)
+		o.jobsCancelSubject = fmt.Sprintf("%s.jobs.cancel", queueName)
 		return nil
 	}
 }

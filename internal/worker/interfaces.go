@@ -12,6 +12,10 @@ type DispatcherClient interface {
 	DispatchJobs(context.Context, func(*core.JobRecord, uint64) (bool, error)) error
 }
 
+type JobCancellationSubscriber interface {
+	SubscribeJobCancellations(context.Context, func(string) bool) error
+}
+
 type JobUpdaterClient interface {
 	UpdateJob(*core.JobRecord, uint64) (uint64, error)
 	UploadLogArtifact(string, string) (string, error)
