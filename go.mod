@@ -1,12 +1,11 @@
 module github.com/synadia-labs/go-bench-away
 
-go 1.25
+go 1.27
 
-toolchain go1.25.5
+toolchain go1.27.1
 
 require (
 	github.com/google/subcommands v1.2.0
-	github.com/google/uuid v1.3.0
 	github.com/montanaflynn/stats v0.7.0
 	github.com/nats-io/nats-server/v2 v2.12.3
 	github.com/nats-io/nats.go v1.48.0
