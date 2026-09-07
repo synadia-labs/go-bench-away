@@ -2,6 +2,7 @@ package reports
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/synadia-labs/go-bench-away/v1/core"
 	"golang.org/x/perf/benchstat"
@@ -41,12 +42,19 @@ func CreateDataTable(client JobRecordClient, jobIds ...string) (DataTable, error
 	}
 
 	for i, jobId := range jobIds {
-		job, results, err := loadJobAndResults(client, jobId)
+		job, _, err := client.LoadJob(jobId)
 		if err != nil {
 			return nil, err
 		}
+		if job.Status != core.Succeeded && job.Status != core.Failed {
+			return nil, fmt.Errorf("Job %s status is %v", job.Id, job.Status)
+		}
+
+		fmt.Printf("Loading job %s\n", jobId)
 		dataTable.jobs[i] = job
-		dataTable.collection.AddConfig(jobId, results)
+		if err := addJobResults(&dataTable.collection, client, jobId, job); err != nil {
+			return nil, err
+		}
 	}
 
 	dataTable.jobLabels = createJobLabels(dataTable.jobs)
@@ -67,6 +75,30 @@ func CreateDataTable(client JobRecordClient, jobIds ...string) (DataTable, error
 	}
 
 	return &dataTable, nil
+}
+
+// addJobResults streams the artifact into benchstat instead of retaining a
+// complete copy of the raw benchmark output in memory while it is parsed.
+func addJobResults(collection *benchstat.Collection, client JobRecordClient, jobId string, job *core.JobRecord) error {
+	reader, writer := io.Pipe()
+	artifactErr := make(chan error, 1)
+	go func() {
+		err := client.LoadResultsArtifact(job, writer)
+		_ = writer.CloseWithError(err)
+		artifactErr <- err
+	}()
+
+	parseErr := collection.AddFile(jobId, reader)
+	if parseErr != nil {
+		_ = reader.CloseWithError(parseErr)
+	} else {
+		_ = reader.Close()
+	}
+	loadErr := <-artifactErr
+	if parseErr != nil {
+		return parseErr
+	}
+	return loadErr
 }
 
 func (dt *dataTableImpl) mapJobs(f func(*core.JobRecord) string) []string {
