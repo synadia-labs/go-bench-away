@@ -25,6 +25,7 @@ type JobParameters struct {
 	Reps            uint
 	TestMinRuntime  time.Duration
 	Timeout         time.Duration
+	FailFast        bool
 	SkipCleanup     bool
 	Username        string
 	GoPath          string

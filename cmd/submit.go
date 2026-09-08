@@ -38,6 +38,7 @@ func (cmd *submitCmd) SetFlags(f *flag.FlagSet) {
 	f.UintVar(&cmd.params.Reps, "reps", 3, "Number of repetitions for each tests")
 	f.DurationVar(&cmd.params.TestMinRuntime, "min_runtime", 1*time.Second, "Minimum duration of each benchmark")
 	f.DurationVar(&cmd.params.Timeout, "timeout", 3*time.Hour, "Max time allowed to run all tests")
+	f.BoolVar(&cmd.params.FailFast, "failfast", false, "Stop after the first test failure")
 	f.BoolVar(&cmd.params.SkipCleanup, "skip_cleanup", false, "Do not remove worker temporary directory after execution")
 	f.StringVar(&cmd.params.GoPath, "go_path", "", "Run using a custom Go (default looks for `go` in $PATH)")
 	f.StringVar(&cmd.params.GoExperiment, "go_experiment", "", "Run using a custom Go experimentflag (optional)")

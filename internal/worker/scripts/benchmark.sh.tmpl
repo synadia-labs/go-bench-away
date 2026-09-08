@@ -65,6 +65,8 @@ GIT_OPS="--quiet"
 GIT_CLONE_OPS="--depth=1 --single-branch -c advice.detachedHead=false"
 # Extra options passed to `go test`
 GO_TEST_OPTS="-v"
+{{if .FailFast}}GO_TEST_OPTS="${GO_TEST_OPTS} -failfast"
+{{end}}
 # Name of checkout folder (within ROOT_DIR)
 CHECKOUT_DIR="source.git"
 

@@ -230,6 +230,7 @@ func (w *workerImpl) runJob(parent context.Context, job *core.JobRecord) (string
 		Reps            string
 		MinRuntime      string
 		Timeout         string
+		FailFast        bool
 		GoPath          string
 		GoExperiment    string
 		CleanupCommand  string
@@ -245,6 +246,7 @@ func (w *workerImpl) runJob(parent context.Context, job *core.JobRecord) (string
 		Reps:            fmt.Sprintf("%d", job.Parameters.Reps),
 		MinRuntime:      fmt.Sprintf("%v", job.Parameters.TestMinRuntime),
 		Timeout:         fmt.Sprintf("%v", job.Parameters.Timeout),
+		FailFast:        job.Parameters.FailFast,
 		GoPath:          job.Parameters.GoPath,
 		GoExperiment:    job.Parameters.GoExperiment,
 		CleanupCommand:  job.Parameters.CleanupCmd,
